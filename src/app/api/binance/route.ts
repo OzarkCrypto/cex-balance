@@ -1,21 +1,35 @@
 import { NextResponse } from 'next/server';
-import crypto from 'crypto';
 
-const API_KEY = process.env.BINANCE_API_KEY || '';
-const SECRET_KEY = process.env.BINANCE_SECRET_KEY || '';
+export const runtime = 'edge';
+export const preferredRegion = 'sin1'; // Singapore
 
-function createSignature(queryString: string): string {
-  return crypto
-    .createHmac('sha256', SECRET_KEY)
-    .update(queryString)
-    .digest('hex');
+function arrayBufferToHex(buffer: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function createSignature(queryString: string, secretKey: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secretKey),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(queryString));
+  return arrayBufferToHex(signature);
 }
 
 export async function GET() {
+  const API_KEY = process.env.BINANCE_API_KEY || '';
+  const SECRET_KEY = process.env.BINANCE_SECRET_KEY || '';
+
   try {
     const timestamp = Date.now();
     const queryString = `timestamp=${timestamp}`;
-    const signature = createSignature(queryString);
+    const signature = await createSignature(queryString, SECRET_KEY);
 
     const response = await fetch(
       `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`,
