@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export const runtime = 'edge';
+export const preferredRegion = 'sin1'; // Singapore
+
 export async function GET() {
   try {
     const response = await fetch(
