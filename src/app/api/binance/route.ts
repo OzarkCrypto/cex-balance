@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 export const runtime = 'edge';
-export const preferredRegion = ['hnd1', 'sin1', 'icn1']; // Tokyo, Singapore, Seoul fallback
+export const preferredRegion = ['hnd1', 'sin1', 'icn1'];
 
 function arrayBufferToHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
@@ -26,38 +26,53 @@ export async function GET() {
   const API_KEY = process.env.BINANCE_API_KEY || '';
   const SECRET_KEY = process.env.BINANCE_SECRET_KEY || '';
 
+  // Debug: Check if env vars are set
+  if (!API_KEY || !SECRET_KEY) {
+    return NextResponse.json({
+      error: 'Missing API credentials',
+      debug: {
+        hasApiKey: !!API_KEY,
+        hasSecretKey: !!SECRET_KEY,
+        apiKeyLength: API_KEY.length,
+        secretKeyLength: SECRET_KEY.length
+      }
+    }, { status: 500 });
+  }
+
   try {
     const timestamp = Date.now();
     const queryString = `timestamp=${timestamp}`;
     const signature = await createSignature(queryString, SECRET_KEY);
 
-    // Spot account balance
-    const accountResponse = await fetch(
-      `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`,
-      {
-        headers: {
-          'X-MBX-APIKEY': API_KEY,
-        },
-      }
-    );
+    const url = `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`;
+    
+    const accountResponse = await fetch(url, {
+      headers: {
+        'X-MBX-APIKEY': API_KEY,
+      },
+    });
 
+    const responseText = await accountResponse.text();
+    
     if (!accountResponse.ok) {
-      const errorText = await accountResponse.text();
-      return NextResponse.json(
-        { error: 'Binance API error', details: errorText },
-        { status: accountResponse.status }
-      );
+      return NextResponse.json({
+        error: 'Binance API error',
+        status: accountResponse.status,
+        details: responseText,
+        debug: {
+          url: url.substring(0, 80) + '...',
+          timestamp
+        }
+      }, { status: accountResponse.status });
     }
 
-    const accountData = await accountResponse.json();
+    const accountData = JSON.parse(responseText);
     
-    // Filter non-zero balances
     const balances = accountData.balances.filter(
       (b: { free: string; locked: string }) => 
         parseFloat(b.free) > 0 || parseFloat(b.locked) > 0
     );
 
-    // Get current prices
     const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price');
     const pricesData = await pricesResponse.json();
     
@@ -66,7 +81,6 @@ export async function GET() {
       priceMap[p.symbol] = parseFloat(p.price);
     });
 
-    // Calculate USD values
     let totalUsdValue = 0;
     const enrichedBalances = balances.map((b: { asset: string; free: string; locked: string }) => {
       const total = parseFloat(b.free) + parseFloat(b.locked);
@@ -93,7 +107,6 @@ export async function GET() {
       };
     });
 
-    // Sort by USD value descending
     enrichedBalances.sort((a: { usdValue: number }, b: { usdValue: number }) => 
       b.usdValue - a.usdValue
     );
@@ -104,10 +117,9 @@ export async function GET() {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Error fetching Binance balance:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch balance' },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: 'Failed to fetch balance',
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
   }
 }
