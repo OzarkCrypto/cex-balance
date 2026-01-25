@@ -31,13 +31,14 @@ interface ApiResponse {
   error?: string;
 }
 
-const formatUsd = (value: number) => {
+const formatUsd = (value: number | undefined | null): string => {
+  if (value === undefined || value === null) return '$0.00';
   if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
   if (value >= 1000) return `$${(value / 1000).toFixed(2)}K`;
   return `$${value.toFixed(2)}`;
 };
 
-const AccountCard = ({ account }: { account: AccountData }) => {
+function AccountCard({ account }: { account: AccountData }) {
   const [expanded, setExpanded] = useState(account.totalUsdValue > 100);
   
   const typeColors: Record<string, string> = {
@@ -123,7 +124,7 @@ const AccountCard = ({ account }: { account: AccountData }) => {
       )}
     </div>
   );
-};
+}
 
 export default function Home() {
   const [data, setData] = useState<ApiResponse | null>(null);
@@ -214,9 +215,9 @@ export default function Home() {
             Total Portfolio Value
           </p>
           <p style={{ color: '#fff', fontSize: '3rem', fontWeight: '700' }}>
-            {loading && !data ? '...' : data ? formatUsd(data.grandTotal) : '$0.00'}
+            {loading && !data ? '...' : formatUsd(data?.grandTotal)}
           </p>
-          {data && (
+          {data && data.timestamp && (
             <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', marginTop: '8px' }}>
               Updated: {new Date(data.timestamp).toLocaleString()}
             </p>
@@ -234,10 +235,10 @@ export default function Home() {
             }}>
               <p style={{ color: '#F0B90B', fontSize: '0.85rem', marginBottom: '4px' }}>Master Account</p>
               <p style={{ color: '#fff', fontSize: '1.5rem', fontWeight: '700' }}>
-                {formatUsd(data.master.totalUsdValue)}
+                {formatUsd(data.master?.totalUsdValue)}
               </p>
               <p style={{ color: '#8892b0', fontSize: '0.75rem', marginTop: '4px' }}>
-                {data.master.accounts.length} wallets
+                {data.master?.accounts?.length || 0} wallets
               </p>
             </div>
             <div style={{
@@ -248,35 +249,35 @@ export default function Home() {
             }}>
               <p style={{ color: '#2ecc71', fontSize: '0.85rem', marginBottom: '4px' }}>Sub Accounts</p>
               <p style={{ color: '#fff', fontSize: '1.5rem', fontWeight: '700' }}>
-                {formatUsd(data.subAccounts.totalUsdValue)}
+                {formatUsd(data.subAccounts?.totalUsdValue)}
               </p>
               <p style={{ color: '#8892b0', fontSize: '0.75rem', marginTop: '4px' }}>
-                {data.subAccounts.accounts.length} wallets
+                {data.subAccounts?.accounts?.length || 0} wallets
               </p>
             </div>
           </div>
         )}
 
         {/* Master Accounts */}
-        {data && data.master.accounts.length > 0 && (
+        {data && data.master?.accounts && data.master.accounts.length > 0 && (
           <div style={{ marginBottom: '32px' }}>
             <h2 style={{ color: '#F0B90B', fontSize: '1.1rem', fontWeight: '600', marginBottom: '16px' }}>
               📊 Master Account
             </h2>
             {data.master.accounts.map((account, i) => (
-              <AccountCard key={i} account={account} />
+              <AccountCard key={`master-${i}`} account={account} />
             ))}
           </div>
         )}
 
         {/* Sub Accounts */}
-        {data && data.subAccounts.accounts.length > 0 && (
+        {data && data.subAccounts?.accounts && data.subAccounts.accounts.length > 0 && (
           <div style={{ marginBottom: '32px' }}>
             <h2 style={{ color: '#2ecc71', fontSize: '1.1rem', fontWeight: '600', marginBottom: '16px' }}>
               👥 Sub Accounts
             </h2>
             {data.subAccounts.accounts.map((account, i) => (
-              <AccountCard key={i} account={account} />
+              <AccountCard key={`sub-${i}`} account={account} />
             ))}
           </div>
         )}
