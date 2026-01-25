@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 export const runtime = 'edge';
-export const preferredRegion = 'sin1'; // Singapore
+export const preferredRegion = ['hnd1', 'sin1', 'icn1']; // Tokyo, Singapore, Seoul fallback
 
 function arrayBufferToHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
@@ -31,7 +31,8 @@ export async function GET() {
     const queryString = `timestamp=${timestamp}`;
     const signature = await createSignature(queryString, SECRET_KEY);
 
-    const response = await fetch(
+    // Spot account balance
+    const accountResponse = await fetch(
       `https://api.binance.com/api/v3/account?${queryString}&signature=${signature}`,
       {
         headers: {
@@ -40,30 +41,66 @@ export async function GET() {
       }
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
+    if (!accountResponse.ok) {
+      const errorText = await accountResponse.text();
       return NextResponse.json(
         { error: 'Binance API error', details: errorText },
-        { status: response.status }
+        { status: accountResponse.status }
       );
     }
 
-    const data = await response.json();
+    const accountData = await accountResponse.json();
     
-    // Filter balances with non-zero amounts
-    const balances = data.balances
-      .filter((b: { free: string; locked: string }) => 
+    // Filter non-zero balances
+    const balances = accountData.balances.filter(
+      (b: { free: string; locked: string }) => 
         parseFloat(b.free) > 0 || parseFloat(b.locked) > 0
-      )
-      .map((b: { asset: string; free: string; locked: string }) => ({
+    );
+
+    // Get current prices
+    const pricesResponse = await fetch('https://api.binance.com/api/v3/ticker/price');
+    const pricesData = await pricesResponse.json();
+    
+    const priceMap: Record<string, number> = {};
+    pricesData.forEach((p: { symbol: string; price: string }) => {
+      priceMap[p.symbol] = parseFloat(p.price);
+    });
+
+    // Calculate USD values
+    let totalUsdValue = 0;
+    const enrichedBalances = balances.map((b: { asset: string; free: string; locked: string }) => {
+      const total = parseFloat(b.free) + parseFloat(b.locked);
+      let usdValue = 0;
+
+      if (b.asset === 'USDT' || b.asset === 'USDC' || b.asset === 'BUSD' || b.asset === 'FDUSD') {
+        usdValue = total;
+      } else if (priceMap[`${b.asset}USDT`]) {
+        usdValue = total * priceMap[`${b.asset}USDT`];
+      } else if (priceMap[`${b.asset}BUSD`]) {
+        usdValue = total * priceMap[`${b.asset}BUSD`];
+      } else if (priceMap[`${b.asset}FDUSD`]) {
+        usdValue = total * priceMap[`${b.asset}FDUSD`];
+      }
+
+      totalUsdValue += usdValue;
+
+      return {
         asset: b.asset,
         free: parseFloat(b.free),
         locked: parseFloat(b.locked),
-        total: parseFloat(b.free) + parseFloat(b.locked),
-      }));
+        total,
+        usdValue,
+      };
+    });
+
+    // Sort by USD value descending
+    enrichedBalances.sort((a: { usdValue: number }, b: { usdValue: number }) => 
+      b.usdValue - a.usdValue
+    );
 
     return NextResponse.json({
-      balances,
+      totalUsdValue,
+      balances: enrichedBalances,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
