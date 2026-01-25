@@ -1,204 +1,289 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Balance {
   asset: string;
   free: number;
   locked: number;
   total: number;
-  usdValue?: number;
+  usdValue: number;
 }
 
-interface BinanceResponse {
+interface AccountData {
+  accountType: string;
+  accountName: string;
   balances: Balance[];
+  totalUsdValue: number;
+}
+
+interface ApiResponse {
+  master: {
+    accounts: AccountData[];
+    totalUsdValue: number;
+  };
+  subAccounts: {
+    accounts: AccountData[];
+    totalUsdValue: number;
+  };
+  grandTotal: number;
   timestamp: string;
   error?: string;
 }
 
-export default function Home() {
-  const [balances, setBalances] = useState<Balance[]>([]);
-  const [prices, setPrices] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<string>('');
+const formatUsd = (value: number) => {
+  if (value >= 1000000) return `$${(value / 1000000).toFixed(2)}M`;
+  if (value >= 1000) return `$${(value / 1000).toFixed(2)}K`;
+  return `$${value.toFixed(2)}`;
+};
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const [balanceRes, priceRes] = await Promise.all([
-        fetch('/api/binance'),
-        fetch('/api/prices'),
-      ]);
-
-      if (!balanceRes.ok) {
-        const errorData = await balanceRes.json();
-        throw new Error(errorData.error || 'Failed to fetch balances');
-      }
-
-      const balanceData: BinanceResponse = await balanceRes.json();
-      const priceData: Record<string, number> = await priceRes.json();
-
-      setPrices(priceData);
-
-      // Calculate USD values
-      const balancesWithUsd = balanceData.balances.map((b) => {
-        let usdValue = 0;
-
-        if (b.asset === 'USDT' || b.asset === 'USDC' || b.asset === 'BUSD' || b.asset === 'USD') {
-          usdValue = b.total;
-        } else if (priceData[`${b.asset}USDT`]) {
-          usdValue = b.total * priceData[`${b.asset}USDT`];
-        } else if (priceData[`${b.asset}BUSD`]) {
-          usdValue = b.total * priceData[`${b.asset}BUSD`];
-        } else if (priceData[`${b.asset}USDC`]) {
-          usdValue = b.total * priceData[`${b.asset}USDC`];
-        }
-
-        return { ...b, usdValue };
-      });
-
-      // Sort by USD value descending
-      balancesWithUsd.sort((a, b) => (b.usdValue || 0) - (a.usdValue || 0));
-
-      setBalances(balancesWithUsd);
-      setLastUpdate(new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    // Auto refresh every 60 seconds
-    const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
-
-  const totalUsdValue = balances.reduce((sum, b) => sum + (b.usdValue || 0), 0);
-
-  const formatNumber = (num: number, decimals: number = 2) => {
-    if (num === 0) return '0';
-    if (num < 0.01) return num.toFixed(8);
-    return num.toLocaleString('en-US', { 
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals 
-    });
-  };
-
-  const formatUsd = (num: number) => {
-    return '$' + num.toLocaleString('en-US', { 
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2 
-    });
+const AccountCard = ({ account }: { account: AccountData }) => {
+  const [expanded, setExpanded] = useState(account.totalUsdValue > 100);
+  
+  const typeColors: Record<string, string> = {
+    spot: '#F0B90B',
+    margin: '#F6465D',
+    futures: '#0ECB81',
+    coin_futures: '#1E90FF',
+    earn: '#9B59B6',
+    funding: '#3498DB',
+    sub_spot: '#E67E22',
+    sub_futures: '#27AE60',
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      <div className="max-w-6xl mx-auto px-4 py-8">
+    <div style={{
+      background: 'rgba(255,255,255,0.03)',
+      borderRadius: '12px',
+      border: '1px solid rgba(255,255,255,0.1)',
+      marginBottom: '12px',
+      overflow: 'hidden',
+    }}>
+      <div 
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          padding: '16px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          cursor: 'pointer',
+          borderLeft: `4px solid ${typeColors[account.accountType] || '#888'}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ color: '#fff', fontWeight: '600' }}>{account.accountName}</span>
+          <span style={{ 
+            background: typeColors[account.accountType] || '#888',
+            color: '#000',
+            padding: '2px 8px',
+            borderRadius: '4px',
+            fontSize: '0.7rem',
+            fontWeight: '600',
+          }}>
+            {account.balances.length} assets
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ color: '#64ffda', fontWeight: '700', fontFamily: 'monospace' }}>
+            {formatUsd(account.totalUsdValue)}
+          </span>
+          <span style={{ color: '#8892b0' }}>{expanded ? '▲' : '▼'}</span>
+        </div>
+      </div>
+      
+      {expanded && account.balances.length > 0 && (
+        <div style={{ padding: '0 16px 16px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                <th style={{ padding: '8px', textAlign: 'left', color: '#8892b0', fontSize: '0.75rem' }}>Asset</th>
+                <th style={{ padding: '8px', textAlign: 'right', color: '#8892b0', fontSize: '0.75rem' }}>Available</th>
+                <th style={{ padding: '8px', textAlign: 'right', color: '#8892b0', fontSize: '0.75rem' }}>Locked</th>
+                <th style={{ padding: '8px', textAlign: 'right', color: '#8892b0', fontSize: '0.75rem' }}>USD Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {account.balances.map((b) => (
+                <tr key={b.asset} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <td style={{ padding: '8px', color: '#fff', fontWeight: '500' }}>{b.asset}</td>
+                  <td style={{ padding: '8px', textAlign: 'right', color: '#ccd6f6', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                    {b.free.toFixed(6)}
+                  </td>
+                  <td style={{ padding: '8px', textAlign: 'right', color: '#8892b0', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                    {b.locked.toFixed(6)}
+                  </td>
+                  <td style={{ padding: '8px', textAlign: 'right', color: '#64ffda', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                    ${b.usdValue.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default function Home() {
+  const [data, setData] = useState<ApiResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/binance');
+      const result = await response.json();
+      
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setData(result);
+        setError(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%)',
+      padding: '40px 20px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    }}>
+      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
           <div>
-            <h1 className="text-3xl font-bold text-white">CEX Balance</h1>
-            <p className="text-gray-400 mt-1">Exchange Portfolio Dashboard</p>
+            <h1 style={{ fontSize: '2rem', fontWeight: '700', color: '#fff', marginBottom: '4px' }}>
+              CEX Balance
+            </h1>
+            <p style={{ color: '#8892b0', fontSize: '0.9rem' }}>Binance Portfolio Dashboard</p>
           </div>
           <button
             onClick={fetchData}
             disabled={loading}
-            className="px-4 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold rounded-lg transition-colors disabled:opacity-50"
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '8px',
+              padding: '10px 20px',
+              color: '#fff',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.5 : 1,
+            }}
           >
-            {loading ? 'Loading...' : 'Refresh'}
+            {loading ? '⏳ Loading...' : '🔄 Refresh'}
           </button>
         </div>
 
-        {/* Error Display */}
+        {/* Error */}
         {error && (
-          <div className="bg-red-900/50 border border-red-500 rounded-lg p-4 mb-6">
-            <p className="text-red-300">{error}</p>
+          <div style={{
+            background: 'rgba(255, 82, 82, 0.1)',
+            border: '1px solid rgba(255, 82, 82, 0.3)',
+            borderRadius: '12px',
+            padding: '16px',
+            marginBottom: '24px',
+            color: '#ff5252',
+          }}>
+            ⚠️ {error}
           </div>
         )}
 
-        {/* Total Value Card */}
-        <div className="bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-2xl p-6 mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-yellow-500 rounded-full flex items-center justify-center">
-              <span className="text-black font-bold text-lg">B</span>
-            </div>
-            <span className="text-xl font-semibold text-yellow-500">Binance</span>
-          </div>
-          <p className="text-gray-400 text-sm mb-1">Total Portfolio Value</p>
-          <p className="text-4xl font-bold text-white">{formatUsd(totalUsdValue)}</p>
-          <p className="text-gray-500 text-sm mt-2">Last updated: {lastUpdate}</p>
-        </div>
-
-        {/* Balances Table */}
-        <div className="bg-gray-900 rounded-2xl border border-gray-800 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-800">
-            <h2 className="text-lg font-semibold">Asset Balances</h2>
-          </div>
-          
-          {loading && balances.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="animate-spin w-8 h-8 border-2 border-yellow-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-              <p className="text-gray-400">Loading balances...</p>
-            </div>
-          ) : balances.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-gray-400">No balances found</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-gray-400 text-sm">
-                    <th className="text-left px-6 py-3 font-medium">Asset</th>
-                    <th className="text-right px-6 py-3 font-medium">Available</th>
-                    <th className="text-right px-6 py-3 font-medium">Locked</th>
-                    <th className="text-right px-6 py-3 font-medium">Total</th>
-                    <th className="text-right px-6 py-3 font-medium">USD Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {balances.map((balance) => (
-                    <tr 
-                      key={balance.asset} 
-                      className="border-t border-gray-800 hover:bg-gray-800/50 transition-colors"
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center text-xs font-bold">
-                            {balance.asset.slice(0, 2)}
-                          </div>
-                          <span className="font-medium">{balance.asset}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right font-mono text-gray-300">
-                        {formatNumber(balance.free, 8)}
-                      </td>
-                      <td className="px-6 py-4 text-right font-mono text-gray-300">
-                        {formatNumber(balance.locked, 8)}
-                      </td>
-                      <td className="px-6 py-4 text-right font-mono text-white font-medium">
-                        {formatNumber(balance.total, 8)}
-                      </td>
-                      <td className="px-6 py-4 text-right font-mono text-yellow-500 font-medium">
-                        {balance.usdValue ? formatUsd(balance.usdValue) : '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        {/* Grand Total */}
+        <div style={{
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          borderRadius: '16px',
+          padding: '32px',
+          marginBottom: '32px',
+          boxShadow: '0 10px 40px rgba(102, 126, 234, 0.3)',
+        }}>
+          <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.9rem', marginBottom: '8px' }}>
+            Total Portfolio Value
+          </p>
+          <p style={{ color: '#fff', fontSize: '3rem', fontWeight: '700' }}>
+            {loading && !data ? '...' : data ? formatUsd(data.grandTotal) : '$0.00'}
+          </p>
+          {data && (
+            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', marginTop: '8px' }}>
+              Updated: {new Date(data.timestamp).toLocaleString()}
+            </p>
           )}
         </div>
 
+        {/* Summary Cards */}
+        {data && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '32px' }}>
+            <div style={{
+              background: 'rgba(240, 185, 11, 0.1)',
+              border: '1px solid rgba(240, 185, 11, 0.3)',
+              borderRadius: '12px',
+              padding: '20px',
+            }}>
+              <p style={{ color: '#F0B90B', fontSize: '0.85rem', marginBottom: '4px' }}>Master Account</p>
+              <p style={{ color: '#fff', fontSize: '1.5rem', fontWeight: '700' }}>
+                {formatUsd(data.master.totalUsdValue)}
+              </p>
+              <p style={{ color: '#8892b0', fontSize: '0.75rem', marginTop: '4px' }}>
+                {data.master.accounts.length} wallets
+              </p>
+            </div>
+            <div style={{
+              background: 'rgba(46, 204, 113, 0.1)',
+              border: '1px solid rgba(46, 204, 113, 0.3)',
+              borderRadius: '12px',
+              padding: '20px',
+            }}>
+              <p style={{ color: '#2ecc71', fontSize: '0.85rem', marginBottom: '4px' }}>Sub Accounts</p>
+              <p style={{ color: '#fff', fontSize: '1.5rem', fontWeight: '700' }}>
+                {formatUsd(data.subAccounts.totalUsdValue)}
+              </p>
+              <p style={{ color: '#8892b0', fontSize: '0.75rem', marginTop: '4px' }}>
+                {data.subAccounts.accounts.length} wallets
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Master Accounts */}
+        {data && data.master.accounts.length > 0 && (
+          <div style={{ marginBottom: '32px' }}>
+            <h2 style={{ color: '#F0B90B', fontSize: '1.1rem', fontWeight: '600', marginBottom: '16px' }}>
+              📊 Master Account
+            </h2>
+            {data.master.accounts.map((account, i) => (
+              <AccountCard key={i} account={account} />
+            ))}
+          </div>
+        )}
+
+        {/* Sub Accounts */}
+        {data && data.subAccounts.accounts.length > 0 && (
+          <div style={{ marginBottom: '32px' }}>
+            <h2 style={{ color: '#2ecc71', fontSize: '1.1rem', fontWeight: '600', marginBottom: '16px' }}>
+              👥 Sub Accounts
+            </h2>
+            {data.subAccounts.accounts.map((account, i) => (
+              <AccountCard key={i} account={account} />
+            ))}
+          </div>
+        )}
+
         {/* Footer */}
-        <div className="mt-8 text-center text-gray-500 text-sm">
-          <p>Auto-refreshes every 60 seconds • Data from Binance API</p>
+        <div style={{ textAlign: 'center', color: '#8892b0', fontSize: '0.8rem' }}>
+          <p>Auto-refresh every 60 seconds • Edge Runtime (Asia Region)</p>
         </div>
       </div>
     </div>
